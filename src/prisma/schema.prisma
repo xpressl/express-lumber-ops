@@ -1,5 +1,7 @@
+// ============================================================
 // Express Lumber Ops - Database Schema
-// Phase 1B will expand this with full platform core models
+// Phase 1B: Platform Core Models and Enums
+// ============================================================
 
 generator client {
   provider = "prisma-client-js"
@@ -10,8 +12,493 @@ datasource db {
   provider = "postgresql"
 }
 
-// Placeholder model for initial Prisma generation
-// Full schema will be built in TASK-008
+// ============================================================
+// ENUMS
+// ============================================================
+
+enum UserStatus {
+  ACTIVE
+  INACTIVE
+  SUSPENDED
+  PENDING
+}
+
+enum PermissionAction {
+  VIEW
+  CREATE
+  EDIT
+  DELETE
+  APPROVE
+  OVERRIDE
+  EXPORT
+  ADMIN
+}
+
+enum ScopeType {
+  ALL
+  BRANCH
+  OWN
+  TEAM
+  ASSIGNED
+  READ_ONLY
+}
+
+enum FlagState {
+  ON
+  OFF
+  BETA
+  READ_ONLY
+  HIDDEN
+}
+
+enum FlagLevel {
+  COMPANY
+  BRANCH
+  ROLE
+  USER
+  ENVIRONMENT
+}
+
+enum ApprovalStatus {
+  PENDING
+  APPROVED
+  DENIED
+  EXPIRED
+  ESCALATED
+  CANCELLED
+}
+
+enum ExceptionSeverity {
+  CRITICAL
+  HIGH
+  MEDIUM
+  LOW
+}
+
+enum ExceptionStatus {
+  OPEN
+  ACKNOWLEDGED
+  IN_PROGRESS
+  RESOLVED
+  ESCALATED
+  DISMISSED
+}
+
+enum SecurityEventType {
+  LOGIN
+  LOGOUT
+  FAILED_LOGIN
+  PASSWORD_CHANGE
+  PASSWORD_RESET
+  ROLE_CHANGE
+  PERMISSION_CHANGE
+  FEATURE_FLAG_CHANGE
+  SENSITIVE_ACCESS
+  EXPORT
+  IMPERSONATION
+}
+
+// ============================================================
+// USER & AUTH
+// ============================================================
+
+model User {
+  id                 String    @id @default(cuid())
+  email              String    @unique
+  passwordHash       String
+  firstName          String
+  lastName           String
+  phone              String?
+  avatarUrl          String?
+  status             UserStatus @default(PENDING)
+  lastLoginAt        DateTime?
+  failedLoginCount   Int       @default(0)
+  lockedUntil        DateTime?
+  mustChangePassword Boolean   @default(false)
+  twoFactorEnabled   Boolean   @default(false)
+  twoFactorSecret    String?
+  createdAt          DateTime  @default(now())
+  updatedAt          DateTime  @updatedAt
+  deletedAt          DateTime?
+  createdBy          String?
+
+  // Relations
+  profile            UserProfile?
+  roleAssignments    UserRoleAssignment[]
+  assignedByRoles    UserRoleAssignment[] @relation("AssignedBy")
+  revokedByRoles     UserRoleAssignment[] @relation("RevokedBy")
+  featureFlagAssignments FeatureFlagAssignment[] @relation("FlagCreatedBy")
+  approvalRequests   ApprovalRequest[]    @relation("ApprovalRequester")
+  resolvedApprovals  ApprovalRequest[]    @relation("ApprovalResolver")
+  auditEvents        AuditEvent[]
+  securityEventsActor SecurityEvent[]     @relation("SecurityActor")
+  securityEventsTarget SecurityEvent[]    @relation("SecurityTarget")
+  exceptionsOwned    Exception[]          @relation("ExceptionOwner")
+  exceptionsResolved Exception[]          @relation("ExceptionResolver")
+  exceptionsEscalated Exception[]         @relation("ExceptionEscalatedTo")
+
+  @@index([email])
+  @@index([status])
+  @@index([deletedAt])
+}
+
+model UserProfile {
+  id                String    @id @default(cuid())
+  userId            String    @unique
+  title             String?
+  department        String?
+  defaultLocationId String?
+  defaultPrinter    String?
+  timezone          String    @default("America/New_York")
+  locale            String    @default("en-US")
+
+  user              User      @relation(fields: [userId], references: [id], onDelete: Cascade)
+  defaultLocation   Location? @relation(fields: [defaultLocationId], references: [id])
+}
+
+model UserPreference {
+  id     String @id @default(cuid())
+  userId String
+  key    String
+  value  Json
+
+  @@unique([userId, key])
+  @@index([userId])
+}
+
+// ============================================================
+// LOCATION (BRANCH)
+// ============================================================
+
+model Location {
+  id          String    @id @default(cuid())
+  code        String    @unique
+  name        String
+  address     String
+  city        String
+  state       String
+  zip         String
+  phone       String?
+  fax         String?
+  email       String?
+  timezone    String    @default("America/New_York")
+  isActive    Boolean   @default(true)
+  cutoffTime  String    @default("14:00")
+  settings    Json?
+  createdAt   DateTime  @default(now())
+  updatedAt   DateTime  @updatedAt
+  deletedAt   DateTime?
+
+  // Relations
+  userProfiles      UserProfile[]
+  roleAssignments   UserRoleAssignment[]
+  branchSettings    BranchSetting[]
+  approvalPolicies  ApprovalPolicy[]
+  approvalRequests  ApprovalRequest[]
+  auditEvents       AuditEvent[]
+  exceptions        Exception[]
+
+  @@index([code])
+  @@index([isActive])
+}
+
+// ============================================================
+// RBAC: ROLES & PERMISSIONS
+// ============================================================
+
+model Role {
+  id          String    @id @default(cuid())
+  name        String    @unique
+  displayName String
+  description String?
+  isSystem    Boolean   @default(false)
+  isDefault   Boolean   @default(false)
+  department  String?
+  sortOrder   Int       @default(0)
+  createdAt   DateTime  @default(now())
+  updatedAt   DateTime  @updatedAt
+
+  // Relations
+  permissions      RolePermission[]
+  userAssignments  UserRoleAssignment[]
+}
+
+model Permission {
+  id           String           @id @default(cuid())
+  code         String           @unique
+  name         String
+  description  String?
+  module       String
+  action       PermissionAction
+  resourceType String?
+  isSystem     Boolean          @default(false)
+
+  // Relations
+  rolePermissions RolePermission[]
+
+  @@index([module])
+  @@index([code])
+}
+
+model RolePermission {
+  id                String    @id @default(cuid())
+  roleId            String
+  permissionId      String
+  scopeType         ScopeType @default(ALL)
+  scopeValue        String?
+  fieldRestrictions Json?
+  conditions        Json?
+
+  role       Role       @relation(fields: [roleId], references: [id], onDelete: Cascade)
+  permission Permission @relation(fields: [permissionId], references: [id], onDelete: Cascade)
+
+  @@unique([roleId, permissionId])
+  @@index([roleId])
+  @@index([permissionId])
+}
+
+model UserRoleAssignment {
+  id           String    @id @default(cuid())
+  userId       String
+  roleId       String
+  locationId   String?
+  isTemporary  Boolean   @default(false)
+  expiresAt    DateTime?
+  assignedBy   String
+  assignedAt   DateTime  @default(now())
+  revokedAt    DateTime?
+  revokedBy    String?
+  reason       String?
+
+  user         User      @relation(fields: [userId], references: [id], onDelete: Cascade)
+  role         Role      @relation(fields: [roleId], references: [id], onDelete: Cascade)
+  location     Location? @relation(fields: [locationId], references: [id])
+  assigner     User      @relation("AssignedBy", fields: [assignedBy], references: [id])
+  revoker      User?     @relation("RevokedBy", fields: [revokedBy], references: [id])
+
+  @@unique([userId, roleId, locationId])
+  @@index([userId])
+  @@index([roleId])
+  @@index([locationId])
+}
+
+// ============================================================
+// FEATURE FLAGS
+// ============================================================
+
+model FeatureFlag {
+  id           String    @id @default(cuid())
+  code         String    @unique
+  name         String
+  description  String?
+  category     String?
+  defaultState FlagState @default(OFF)
+  createdAt    DateTime  @default(now())
+  updatedAt    DateTime  @updatedAt
+
+  assignments  FeatureFlagAssignment[]
+
+  @@index([code])
+  @@index([category])
+}
+
+model FeatureFlagAssignment {
+  id        String    @id @default(cuid())
+  flagId    String
+  level     FlagLevel
+  targetId  String
+  state     FlagState
+  createdBy String
+  createdAt DateTime  @default(now())
+
+  flag      FeatureFlag @relation(fields: [flagId], references: [id], onDelete: Cascade)
+  creator   User        @relation("FlagCreatedBy", fields: [createdBy], references: [id])
+
+  @@unique([flagId, level, targetId])
+  @@index([flagId])
+  @@index([level, targetId])
+}
+
+// ============================================================
+// APPROVAL ENGINE
+// ============================================================
+
+model ApprovalPolicy {
+  id                String    @id @default(cuid())
+  name              String
+  description       String?
+  actionType        String
+  entityType        String?
+  requesterRoles    String[]
+  approverRoles     String[]
+  thresholdField    String?
+  thresholdMin      Decimal?  @db.Decimal(12, 2)
+  thresholdMax      Decimal?  @db.Decimal(12, 2)
+  timeoutHours      Int       @default(24)
+  escalationRoles   String[]
+  requireReason     Boolean   @default(true)
+  requireAttachment Boolean   @default(false)
+  isActive          Boolean   @default(true)
+  locationId        String?
+  createdAt         DateTime  @default(now())
+  updatedAt         DateTime  @updatedAt
+
+  location          Location? @relation(fields: [locationId], references: [id])
+  requests          ApprovalRequest[]
+
+  @@index([actionType])
+  @@index([isActive])
+}
+
+model ApprovalRequest {
+  id             String         @id @default(cuid())
+  policyId       String
+  requesterId    String
+  entityType     String
+  entityId       String
+  status         ApprovalStatus @default(PENDING)
+  oldValue       Json?
+  newValue       Json?
+  reason         String
+  attachmentIds  String[]
+  locationId     String
+  expiresAt      DateTime
+  resolvedAt     DateTime?
+  resolvedBy     String?
+  resolutionNote String?
+  createdAt      DateTime       @default(now())
+  updatedAt      DateTime       @updatedAt
+
+  policy         ApprovalPolicy @relation(fields: [policyId], references: [id])
+  requester      User           @relation("ApprovalRequester", fields: [requesterId], references: [id])
+  resolver       User?          @relation("ApprovalResolver", fields: [resolvedBy], references: [id])
+  location       Location       @relation(fields: [locationId], references: [id])
+
+  @@index([policyId])
+  @@index([requesterId])
+  @@index([status])
+  @@index([entityType, entityId])
+  @@index([locationId])
+}
+
+// ============================================================
+// AUDIT & SECURITY EVENTS
+// ============================================================
+
+model AuditEvent {
+  id          String    @id @default(cuid())
+  actorId     String?
+  actorName   String
+  action      String
+  entityType  String
+  entityId    String
+  entityName  String?
+  locationId  String?
+  before      Json?
+  after       Json?
+  metadata    Json?
+  source      String    @default("web")
+  ipAddress   String?
+  userAgent   String?
+  timestamp   DateTime  @default(now())
+
+  actor       User?     @relation(fields: [actorId], references: [id])
+  location    Location? @relation(fields: [locationId], references: [id])
+
+  @@index([actorId])
+  @@index([entityType, entityId])
+  @@index([action])
+  @@index([locationId])
+  @@index([timestamp])
+}
+
+model SecurityEvent {
+  id           String            @id @default(cuid())
+  type         SecurityEventType
+  actorId      String?
+  targetUserId String?
+  details      Json?
+  ipAddress    String?
+  userAgent    String?
+  success      Boolean
+  timestamp    DateTime          @default(now())
+
+  actor        User?             @relation("SecurityActor", fields: [actorId], references: [id])
+  targetUser   User?             @relation("SecurityTarget", fields: [targetUserId], references: [id])
+
+  @@index([type])
+  @@index([actorId])
+  @@index([targetUserId])
+  @@index([timestamp])
+}
+
+// ============================================================
+// EXCEPTION ENGINE
+// ============================================================
+
+model Exception {
+  id                  String           @id @default(cuid())
+  category            String
+  severity            ExceptionSeverity
+  title               String
+  description         String?
+  entityType          String
+  entityId            String
+  entityName          String?
+  module              String
+  ownerId             String?
+  locationId          String
+  status              ExceptionStatus  @default(OPEN)
+  slaTargetAt         DateTime?
+  resolvedAt          DateTime?
+  resolvedBy          String?
+  resolutionNote      String?
+  escalatedAt         DateTime?
+  escalatedTo         String?
+  priorityScore       Int              @default(0)
+  relatedExceptionIds String[]
+  createdAt           DateTime         @default(now())
+  updatedAt           DateTime         @updatedAt
+
+  owner               User?            @relation("ExceptionOwner", fields: [ownerId], references: [id])
+  resolver            User?            @relation("ExceptionResolver", fields: [resolvedBy], references: [id])
+  escalatedUser       User?            @relation("ExceptionEscalatedTo", fields: [escalatedTo], references: [id])
+  location            Location         @relation(fields: [locationId], references: [id])
+
+  @@index([category])
+  @@index([severity])
+  @@index([status])
+  @@index([ownerId])
+  @@index([locationId])
+  @@index([module])
+  @@index([entityType, entityId])
+  @@index([slaTargetAt])
+  @@index([priorityScore])
+}
+
+// ============================================================
+// BRANCH SETTINGS
+// ============================================================
+
+model BranchSetting {
+  id          String   @id @default(cuid())
+  locationId  String
+  key         String
+  value       Json
+  category    String
+  description String?
+
+  location    Location @relation(fields: [locationId], references: [id])
+
+  @@unique([locationId, key])
+  @@index([locationId])
+  @@index([category])
+}
+
+// ============================================================
+// HEALTH CHECK (placeholder for connectivity tests)
+// ============================================================
+
 model HealthCheck {
   id        String   @id @default(cuid())
   status    String   @default("ok")
