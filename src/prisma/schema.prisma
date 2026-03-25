@@ -193,6 +193,7 @@ model Location {
   userProfiles      UserProfile[]
   roleAssignments   UserRoleAssignment[]
   branchSettings    BranchSetting[]
+  customers         Customer[]          @relation("CustomerLocation")
   approvalPolicies  ApprovalPolicy[]
   approvalRequests  ApprovalRequest[]
   auditEvents       AuditEvent[]
@@ -496,7 +497,318 @@ model BranchSetting {
 }
 
 // ============================================================
-// HEALTH CHECK (placeholder for connectivity tests)
+// BUSINESS ENUMS (Phase 2A)
+// ============================================================
+
+enum CustomerType {
+  COMMERCIAL
+  RESIDENTIAL
+  CONTRACTOR
+  GOVERNMENT
+}
+
+enum CustomerStatus {
+  ACTIVE
+  INACTIVE
+  ON_HOLD
+  COD_ONLY
+  CLOSED
+}
+
+enum ProductStatus {
+  ACTIVE
+  DISCONTINUED
+  SPECIAL_ORDER
+}
+
+enum VendorStatus {
+  ACTIVE
+  INACTIVE
+  SUSPENDED
+  PROBATION
+}
+
+// ============================================================
+// CUSTOMER
+// ============================================================
+
+model Customer {
+  id                          String         @id @default(cuid())
+  accountNumber               String         @unique
+  companyName                 String
+  dba                         String?
+  type                        CustomerType   @default(COMMERCIAL)
+  status                      CustomerStatus @default(ACTIVE)
+  creditLimit                 Decimal        @default(0) @db.Decimal(12, 2)
+  currentBalance              Decimal        @default(0) @db.Decimal(12, 2)
+  paymentTerms                String         @default("NET30")
+  taxExempt                   Boolean        @default(false)
+  taxId                       String?
+  defaultSalesRepId           String?
+  billingAddress              Json?
+  shippingAddress             Json?
+  defaultDeliveryInstructions String?
+  communicationPreferences    Json?
+  notes                       String?
+  erpCustomerId               String?        @unique
+  locationId                  String
+  createdAt                   DateTime       @default(now())
+  updatedAt                   DateTime       @updatedAt
+  deletedAt                   DateTime?
+  createdBy                   String
+
+  location    Location          @relation("CustomerLocation", fields: [locationId], references: [id])
+  contacts    CustomerContact[]
+  tags        CustomerTag[]
+  jobsites    CustomerJobsite[]
+
+  @@index([accountNumber])
+  @@index([companyName])
+  @@index([status])
+  @@index([locationId])
+  @@index([defaultSalesRepId])
+  @@index([deletedAt])
+}
+
+model CustomerContact {
+  id                     String   @id @default(cuid())
+  customerId             String
+  firstName              String
+  lastName               String
+  email                  String?
+  phone                  String?
+  mobile                 String?
+  role                   String?
+  isPrimary              Boolean  @default(false)
+  preferredContactMethod String?
+  notes                  String?
+  createdAt              DateTime @default(now())
+  updatedAt              DateTime @updatedAt
+  deletedAt              DateTime?
+
+  customer Customer @relation(fields: [customerId], references: [id], onDelete: Cascade)
+
+  @@index([customerId])
+}
+
+model CustomerTag {
+  id         String   @id @default(cuid())
+  customerId String
+  tag        String
+  createdAt  DateTime @default(now())
+
+  customer Customer @relation(fields: [customerId], references: [id], onDelete: Cascade)
+
+  @@unique([customerId, tag])
+  @@index([tag])
+}
+
+model CustomerJobsite {
+  id                     String   @id @default(cuid())
+  customerId             String
+  name                   String
+  address                Json
+  gateCode               String?
+  deliveryInstructions   String?
+  contactName            String?
+  contactPhone           String?
+  notes                  String?
+  createdAt              DateTime @default(now())
+  updatedAt              DateTime @updatedAt
+  deletedAt              DateTime?
+
+  customer Customer @relation(fields: [customerId], references: [id], onDelete: Cascade)
+
+  @@index([customerId])
+}
+
+// ============================================================
+// PRODUCT
+// ============================================================
+
+model ProductCategory {
+  id          String    @id @default(cuid())
+  name        String    @unique
+  parentId    String?
+  description String?
+  sortOrder   Int       @default(0)
+  createdAt   DateTime  @default(now())
+  updatedAt   DateTime  @updatedAt
+
+  parent   ProductCategory?  @relation("CategoryHierarchy", fields: [parentId], references: [id])
+  children ProductCategory[] @relation("CategoryHierarchy")
+  products Product[]
+
+  @@index([parentId])
+}
+
+model Product {
+  id              String        @id @default(cuid())
+  sku             String        @unique
+  name            String
+  description     String?
+  categoryId      String?
+  uom             String
+  isRandomLength  Boolean       @default(false)
+  weight          Decimal?      @db.Decimal(10, 2)
+  currentCost     Decimal       @db.Decimal(10, 4)
+  currentSell     Decimal       @db.Decimal(10, 2)
+  marginPercent   Decimal?      @db.Decimal(5, 2)
+  primaryVendorId String?
+  status          ProductStatus @default(ACTIVE)
+  minOrderQty     Decimal?      @db.Decimal(10, 2)
+  leadTimeDays    Int?
+  erpProductId    String?       @unique
+  locationId      String
+  createdAt       DateTime      @default(now())
+  updatedAt       DateTime      @updatedAt
+  deletedAt       DateTime?
+
+  category        ProductCategory? @relation(fields: [categoryId], references: [id])
+  primaryVendor   Vendor?          @relation("PrimaryVendor", fields: [primaryVendorId], references: [id])
+  costHistory     ProductCostHistory[]
+  vendorPrices    VendorPrice[]
+  inventoryBalances InventoryLocationBalance[]
+  lengthBalances  InventoryLengthBalance[]
+
+  @@index([sku])
+  @@index([name])
+  @@index([categoryId])
+  @@index([primaryVendorId])
+  @@index([status])
+  @@index([locationId])
+  @@index([deletedAt])
+}
+
+model ProductCostHistory {
+  id          String   @id @default(cuid())
+  productId   String
+  oldCost     Decimal  @db.Decimal(10, 4)
+  newCost     Decimal  @db.Decimal(10, 4)
+  changePercent Decimal @db.Decimal(5, 2)
+  source      String
+  vendorId    String?
+  changedBy   String?
+  effectiveAt DateTime @default(now())
+  createdAt   DateTime @default(now())
+
+  product Product @relation(fields: [productId], references: [id])
+
+  @@index([productId])
+  @@index([effectiveAt])
+}
+
+// ============================================================
+// VENDOR
+// ============================================================
+
+model Vendor {
+  id            String       @id @default(cuid())
+  code          String       @unique
+  name          String
+  paymentTerms  String?
+  leadTimeDays  Int?
+  status        VendorStatus @default(ACTIVE)
+  website       String?
+  notes         String?
+  address       Json?
+  reliabilityScore Decimal?  @db.Decimal(3, 2)
+  fillRate      Decimal?     @db.Decimal(5, 2)
+  costVolatility Decimal?    @db.Decimal(5, 2)
+  erpVendorId   String?      @unique
+  createdAt     DateTime     @default(now())
+  updatedAt     DateTime     @updatedAt
+  deletedAt     DateTime?
+
+  contacts       VendorContact[]
+  prices         VendorPrice[]
+  primaryProducts Product[]  @relation("PrimaryVendor")
+
+  @@index([code])
+  @@index([name])
+  @@index([status])
+  @@index([deletedAt])
+}
+
+model VendorContact {
+  id        String   @id @default(cuid())
+  vendorId  String
+  firstName String
+  lastName  String
+  email     String?
+  phone     String?
+  role      String?
+  isPrimary Boolean  @default(false)
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  vendor Vendor @relation(fields: [vendorId], references: [id], onDelete: Cascade)
+
+  @@index([vendorId])
+}
+
+model VendorPrice {
+  id          String   @id @default(cuid())
+  vendorId    String
+  productId   String
+  unitCost    Decimal  @db.Decimal(10, 4)
+  minQty      Decimal? @db.Decimal(10, 2)
+  leadTimeDays Int?
+  effectiveDate DateTime
+  expiresAt   DateTime?
+  isActive    Boolean  @default(true)
+  createdAt   DateTime @default(now())
+  updatedAt   DateTime @updatedAt
+
+  vendor  Vendor  @relation(fields: [vendorId], references: [id])
+  product Product @relation(fields: [productId], references: [id])
+
+  @@unique([vendorId, productId, effectiveDate])
+  @@index([vendorId])
+  @@index([productId])
+  @@index([isActive])
+}
+
+// ============================================================
+// INVENTORY
+// ============================================================
+
+model InventoryLocationBalance {
+  id          String   @id @default(cuid())
+  productId   String
+  locationId  String
+  onHand      Decimal  @db.Decimal(10, 2)
+  allocated   Decimal  @default(0) @db.Decimal(10, 2)
+  available   Decimal  @db.Decimal(10, 2)
+  onOrder     Decimal  @default(0) @db.Decimal(10, 2)
+  reorderPoint Decimal? @db.Decimal(10, 2)
+  binLocation String?
+  lastCountDate DateTime?
+  updatedAt   DateTime @updatedAt
+
+  product Product @relation(fields: [productId], references: [id])
+
+  @@unique([productId, locationId])
+  @@index([locationId])
+}
+
+model InventoryLengthBalance {
+  id          String   @id @default(cuid())
+  productId   String
+  locationId  String
+  length      Decimal  @db.Decimal(10, 2)
+  quantity    Decimal  @db.Decimal(10, 2)
+  updatedAt   DateTime @updatedAt
+
+  product Product @relation(fields: [productId], references: [id])
+
+  @@unique([productId, locationId, length])
+  @@index([productId])
+  @@index([locationId])
+}
+
+// ============================================================
+// HEALTH CHECK
 // ============================================================
 
 model HealthCheck {
