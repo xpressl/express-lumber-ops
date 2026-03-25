@@ -561,6 +561,7 @@ model Customer {
   contacts    CustomerContact[]
   tags        CustomerTag[]
   jobsites    CustomerJobsite[]
+  orders      Order[]
 
   @@index([accountNumber])
   @@index([companyName])
@@ -670,6 +671,7 @@ model Product {
   vendorPrices    VendorPrice[]
   inventoryBalances InventoryLocationBalance[]
   lengthBalances  InventoryLengthBalance[]
+  orderItems      OrderItem[]
 
   @@index([sku])
   @@index([name])
@@ -805,6 +807,494 @@ model InventoryLengthBalance {
   @@unique([productId, locationId, length])
   @@index([productId])
   @@index([locationId])
+}
+
+// ============================================================
+// OPERATIONAL ENUMS (Phase 2A)
+// ============================================================
+
+enum OrderType {
+  DELIVERY
+  PICKUP
+  WILL_CALL
+  TRANSFER
+  RETURN_PICKUP
+  VENDOR_DROP_SHIP
+}
+
+enum OrderStatus {
+  DRAFT
+  IMPORTED
+  NEEDS_REVIEW
+  APPROVED
+  ON_CREDIT_HOLD
+  WAITING_INVENTORY
+  PARTIALLY_READY
+  READY
+  LOADING
+  LOADED
+  DISPATCHED
+  OUT_FOR_DELIVERY
+  DELIVERED
+  PICKUP_READY
+  PICKED_UP
+  REFUSED
+  RESCHEDULED
+  CANCELLED
+  CLOSED
+}
+
+enum ItemReadyStatus {
+  NOT_READY
+  PARTIAL
+  READY
+  BACKORDERED
+  SUBSTITUTED
+}
+
+enum TruckType {
+  FLATBED
+  BOX
+  BOOM
+  PICKUP
+  MOFFETT
+}
+
+enum TruckStatus {
+  AVAILABLE
+  IN_USE
+  MAINTENANCE
+  OUT_OF_SERVICE
+}
+
+enum RouteStatus {
+  PLANNING
+  READY
+  DISPATCHED
+  IN_PROGRESS
+  COMPLETED
+  CANCELLED
+}
+
+enum StopStatus {
+  PENDING
+  EN_ROUTE
+  ARRIVED
+  IN_PROGRESS
+  COMPLETED
+  FAILED
+  SKIPPED
+}
+
+enum StopOutcome {
+  DELIVERED
+  PARTIAL
+  REFUSED
+  NO_ANSWER
+  SITE_CLOSED
+  RESCHEDULED
+  DAMAGED
+  LEFT_ON_SITE
+}
+
+enum PaymentType {
+  CASH
+  CHECK
+  CREDIT_CARD
+  OTHER
+}
+
+enum PickupStatus {
+  WAITING
+  CUSTOMER_ARRIVED
+  PREPPING
+  READY_AT_LANE
+  LOADING
+  HANDED_OFF
+  NO_SHOW
+  CANCELLED
+}
+
+enum YardTaskType {
+  ORDER_PREP
+  LOADING
+  UNLOADING
+  TRANSFER
+  RECEIVING
+  CYCLE_COUNT
+  DAMAGE_INSPECTION
+  CLEANUP
+}
+
+enum YardTaskStatus {
+  PENDING
+  ASSIGNED
+  IN_PROGRESS
+  COMPLETED
+  BLOCKED
+  CANCELLED
+}
+
+enum ReceivingStatus {
+  IN_PROGRESS
+  PENDING_REVIEW
+  APPROVED
+  REJECTED
+  AP_HOLD
+}
+
+enum ReceivingLineStatus {
+  PENDING
+  RECEIVED
+  SHORT
+  OVER
+  DAMAGED
+  SUBSTITUTE
+  REJECTED
+}
+
+// ============================================================
+// ORDER
+// ============================================================
+
+model Order {
+  id                  String      @id @default(cuid())
+  orderNumber         String      @unique
+  type                OrderType   @default(DELIVERY)
+  status              OrderStatus @default(DRAFT)
+  customerId          String
+  customerPO          String?
+  jobsiteName         String?
+  deliveryAddress     Json?
+  contactName         String?
+  contactPhone        String?
+  salesRepId          String?
+  requestedDate       DateTime
+  appointmentFlag     Boolean     @default(false)
+  appointmentWindow   String?
+  codFlag             Boolean     @default(false)
+  codAmount           Decimal?    @db.Decimal(12, 2)
+  holdReasons         String[]
+  rescheduleReason    String?
+  specialInstructions String?
+  internalNotes       String?
+  routeId             String?
+  truckId             String?
+  stopSequence        Int?
+  readinessPercent    Int         @default(0)
+  totalWeight         Decimal?    @db.Decimal(10, 2)
+  totalPieces         Int?
+  totalAmount         Decimal?    @db.Decimal(12, 2)
+  marginPercent       Decimal?    @db.Decimal(5, 2)
+  priorityScore       Int         @default(0)
+  erpOrderId          String?
+  locationId          String
+  dispatchedAt        DateTime?
+  deliveredAt         DateTime?
+  closedAt            DateTime?
+  createdAt           DateTime    @default(now())
+  updatedAt           DateTime    @updatedAt
+  deletedAt           DateTime?
+  createdBy           String
+
+  customer Customer   @relation(fields: [customerId], references: [id])
+  items    OrderItem[]
+  events   OrderEvent[]
+
+  @@index([orderNumber])
+  @@index([customerId])
+  @@index([status])
+  @@index([requestedDate])
+  @@index([locationId])
+  @@index([routeId])
+  @@index([truckId])
+  @@index([salesRepId])
+  @@index([deletedAt])
+}
+
+model OrderItem {
+  id                  String          @id @default(cuid())
+  orderId             String
+  productId           String
+  lineNumber          Int
+  description         String
+  quantity            Decimal         @db.Decimal(10, 2)
+  uom                 String
+  unitPrice           Decimal         @db.Decimal(10, 2)
+  unitCost            Decimal         @db.Decimal(10, 4)
+  extendedPrice       Decimal         @db.Decimal(12, 2)
+  length              Decimal?        @db.Decimal(10, 2)
+  weight              Decimal?        @db.Decimal(10, 2)
+  locationCode        String?
+  readyStatus         ItemReadyStatus @default(NOT_READY)
+  substitutionAllowed Boolean         @default(false)
+  substitutedWith     String?
+  issueFlag           Boolean         @default(false)
+  issueNote           String?
+  notes               String?
+
+  order   Order   @relation(fields: [orderId], references: [id], onDelete: Cascade)
+  product Product @relation(fields: [productId], references: [id])
+
+  @@index([orderId])
+  @@index([productId])
+}
+
+model OrderEvent {
+  id         String   @id @default(cuid())
+  orderId    String
+  fromStatus String?
+  toStatus   String
+  reason     String?
+  actorId    String?
+  actorName  String
+  metadata   Json?
+  createdAt  DateTime @default(now())
+
+  order Order @relation(fields: [orderId], references: [id], onDelete: Cascade)
+
+  @@index([orderId])
+  @@index([createdAt])
+}
+
+// ============================================================
+// TRUCK & ROUTE
+// ============================================================
+
+model Truck {
+  id              String      @id @default(cuid())
+  number          String      @unique
+  name            String?
+  type            TruckType   @default(FLATBED)
+  maxWeight       Decimal     @db.Decimal(10, 2)
+  maxPieces       Int?
+  maxBundles      Int?
+  maxLength       Decimal?    @db.Decimal(10, 2)
+  axleCount       Int         @default(2)
+  hasLiftgate     Boolean     @default(false)
+  hasMoffett      Boolean     @default(false)
+  status          TruckStatus @default(AVAILABLE)
+  currentDriverId String?
+  locationId      String
+  createdAt       DateTime    @default(now())
+  updatedAt       DateTime    @updatedAt
+  deletedAt       DateTime?
+
+  routes Route[]
+
+  @@index([number])
+  @@index([status])
+  @@index([locationId])
+}
+
+model Route {
+  id                  String      @id @default(cuid())
+  routeNumber         String      @unique
+  date                DateTime    @db.Date
+  truckId             String
+  driverId            String
+  dispatcherId        String
+  status              RouteStatus @default(PLANNING)
+  departedAt          DateTime?
+  completedAt         DateTime?
+  totalStops          Int         @default(0)
+  completedStops      Int         @default(0)
+  totalWeight         Decimal?    @db.Decimal(10, 2)
+  totalPieces         Int?
+  estimatedMiles      Decimal?    @db.Decimal(10, 1)
+  estimatedDuration   Int?
+  profitabilityScore  Decimal?    @db.Decimal(5, 2)
+  feasibilityScore    Decimal?    @db.Decimal(5, 2)
+  routeNotes          String?
+  locationId          String
+  createdAt           DateTime    @default(now())
+  updatedAt           DateTime    @updatedAt
+
+  truck Truck       @relation(fields: [truckId], references: [id])
+  stops RouteStop[]
+
+  @@index([routeNumber])
+  @@index([date])
+  @@index([truckId])
+  @@index([driverId])
+  @@index([status])
+  @@index([locationId])
+}
+
+model RouteStop {
+  id                    String       @id @default(cuid())
+  routeId               String
+  orderId               String
+  sequence              Int
+  address               Json
+  customerName          String
+  contactName           String?
+  contactPhone          String?
+  deliveryInstructions  String?
+  gateCode              String?
+  appointmentWindow     String?
+  estimatedArrival      DateTime?
+  actualArrival         DateTime?
+  estimatedServiceTime  Int?
+  status                StopStatus   @default(PENDING)
+  outcome               StopOutcome?
+  failureReason         String?
+  completedAt           DateTime?
+  geofenceEntered       Boolean      @default(false)
+  geofenceLat           Decimal?     @db.Decimal(10, 7)
+  geofenceLng           Decimal?     @db.Decimal(10, 7)
+
+  route          Route           @relation(fields: [routeId], references: [id], onDelete: Cascade)
+  deliveryProof  DeliveryProof?
+  codCollection  CODCollection?
+
+  @@index([routeId])
+  @@index([orderId])
+  @@index([status])
+}
+
+// ============================================================
+// DELIVERY PROOF & COD
+// ============================================================
+
+model DeliveryProof {
+  id           String   @id @default(cuid())
+  stopId       String   @unique
+  signatureUrl String?
+  signedBy     String?
+  photos       String[]
+  notes        String?
+  gpsLat       Decimal  @db.Decimal(10, 7)
+  gpsLng       Decimal  @db.Decimal(10, 7)
+  capturedAt   DateTime @default(now())
+  capturedBy   String
+
+  stop RouteStop @relation(fields: [stopId], references: [id])
+}
+
+model CODCollection {
+  id              String      @id @default(cuid())
+  stopId          String      @unique
+  orderId         String
+  customerId      String
+  amountDue       Decimal     @db.Decimal(12, 2)
+  amountCollected Decimal     @db.Decimal(12, 2)
+  paymentType     PaymentType
+  checkNumber     String?
+  shortageAmount  Decimal?    @db.Decimal(12, 2)
+  shortageReason  String?
+  refusalReason   String?
+  proofPhotoUrl   String?
+  collectedBy     String
+  collectedAt     DateTime    @default(now())
+  verifiedBy      String?
+  verifiedAt      DateTime?
+
+  stop RouteStop @relation(fields: [stopId], references: [id])
+}
+
+// ============================================================
+// PICKUP
+// ============================================================
+
+model PickupTicket {
+  id           String       @id @default(cuid())
+  orderId      String
+  customerId   String
+  status       PickupStatus @default(WAITING)
+  lane         String?
+  bay          String?
+  arrivedAt    DateTime?
+  prepStartedAt DateTime?
+  readyAt      DateTime?
+  handedOffAt  DateTime?
+  handedOffBy  String?
+  notes        String?
+  locationId   String
+  createdAt    DateTime     @default(now())
+  updatedAt    DateTime     @updatedAt
+
+  @@index([orderId])
+  @@index([customerId])
+  @@index([status])
+  @@index([locationId])
+}
+
+// ============================================================
+// YARD TASK
+// ============================================================
+
+model YardTask {
+  id           String         @id @default(cuid())
+  type         YardTaskType
+  orderId      String?
+  assignedTo   String?
+  priority     Int            @default(0)
+  status       YardTaskStatus @default(PENDING)
+  bay          String?
+  notes        String?
+  photos       String[]
+  startedAt    DateTime?
+  completedAt  DateTime?
+  completedBy  String?
+  locationId   String
+  createdAt    DateTime       @default(now())
+  updatedAt    DateTime       @updatedAt
+
+  @@index([type])
+  @@index([assignedTo])
+  @@index([status])
+  @@index([orderId])
+  @@index([locationId])
+}
+
+// ============================================================
+// RECEIVING
+// ============================================================
+
+model ReceivingRecord {
+  id                 String          @id @default(cuid())
+  purchaseOrderId    String
+  receivedBy         String
+  status             ReceivingStatus @default(IN_PROGRESS)
+  totalLinesExpected Int
+  totalLinesReceived Int             @default(0)
+  hasDiscrepancy     Boolean         @default(false)
+  discrepancySeverity String?
+  reviewedBy         String?
+  reviewedAt         DateTime?
+  reviewNotes        String?
+  photos             String[]
+  locationId         String
+  receivedAt         DateTime        @default(now())
+  createdAt          DateTime        @default(now())
+  updatedAt          DateTime        @updatedAt
+
+  lines ReceivingLine[]
+
+  @@index([purchaseOrderId])
+  @@index([status])
+  @@index([locationId])
+}
+
+model ReceivingLine {
+  id                String              @id @default(cuid())
+  receivingRecordId String
+  productId         String
+  lineNumber        Int
+  expectedQty       Decimal             @db.Decimal(10, 2)
+  receivedQty       Decimal             @db.Decimal(10, 2)
+  status            ReceivingLineStatus @default(PENDING)
+  damageNotes       String?
+  photos            String[]
+  notes             String?
+  createdAt         DateTime            @default(now())
+  updatedAt         DateTime            @updatedAt
+
+  receivingRecord ReceivingRecord @relation(fields: [receivingRecordId], references: [id], onDelete: Cascade)
+
+  @@index([receivingRecordId])
+  @@index([productId])
 }
 
 // ============================================================
