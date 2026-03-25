@@ -1,0 +1,19 @@
+// Express Lumber Ops - Database Schema
+// Phase 1B will expand this with full platform core models
+
+generator client {
+  provider = "prisma-client-js"
+  output   = "../node_modules/.prisma/client"
+}
+
+datasource db {
+  provider = "postgresql"
+}
+
+// Placeholder model for initial Prisma generation
+// Full schema will be built in TASK-008
+model HealthCheck {
+  id        String   @id @default(cuid())
+  status    String   @default("ok")
+  checkedAt DateTime @default(now())
+}
