@@ -557,11 +557,12 @@ model Customer {
   deletedAt                   DateTime?
   createdBy                   String
 
-  location    Location          @relation("CustomerLocation", fields: [locationId], references: [id])
-  contacts    CustomerContact[]
-  tags        CustomerTag[]
-  jobsites    CustomerJobsite[]
-  orders      Order[]
+  location           Location            @relation("CustomerLocation", fields: [locationId], references: [id])
+  contacts           CustomerContact[]
+  tags               CustomerTag[]
+  jobsites           CustomerJobsite[]
+  orders             Order[]
+  collectionAccount  CollectionAccount?
 
   @@index([accountNumber])
   @@index([companyName])
@@ -725,6 +726,9 @@ model Vendor {
   contacts       VendorContact[]
   prices         VendorPrice[]
   primaryProducts Product[]  @relation("PrimaryVendor")
+  purchaseOrders PurchaseOrder[]
+  invoices       VendorInvoice[]
+  claims         VendorClaim[]
 
   @@index([code])
   @@index([name])
@@ -1295,6 +1299,495 @@ model ReceivingLine {
 
   @@index([receivingRecordId])
   @@index([productId])
+}
+
+// ============================================================
+// SUPPORT ENUMS (Phase 2A)
+// ============================================================
+
+enum POStatus {
+  DRAFT
+  SUBMITTED
+  CONFIRMED
+  PARTIALLY_RECEIVED
+  RECEIVED
+  CANCELLED
+  CLOSED
+}
+
+enum CollectionStatus {
+  ACTIVE
+  WATCH
+  ESCALATED
+  HOLD
+  RESOLVED
+  CLOSED
+}
+
+enum PromiseStatus {
+  PENDING
+  KEPT
+  BROKEN
+  PARTIAL
+  CANCELLED
+}
+
+enum DisputeStatus {
+  OPEN
+  INVESTIGATING
+  RESOLVED
+  CLOSED
+}
+
+enum LeadStatus {
+  NEW
+  CONTACTED
+  ESTIMATE_SENT
+  FOLLOW_UP
+  NEGOTIATION
+  WON
+  LOST
+}
+
+enum EstimateStatus {
+  DRAFT
+  SENT
+  VIEWED
+  FOLLOW_UP
+  ACCEPTED
+  DECLINED
+  EXPIRED
+}
+
+enum ImportType {
+  ORDERS
+  CUSTOMERS
+  INVOICES
+  AR_AGING
+  VENDOR_PRICES
+  PRODUCTS
+  INVENTORY
+  QUOTES
+}
+
+enum ImportStatus {
+  UPLOADING
+  PARSING
+  MAPPED
+  REVIEWING
+  APPROVED
+  REJECTED
+  PROCESSING
+  COMPLETED
+  FAILED
+}
+
+// ============================================================
+// PURCHASE ORDER
+// ============================================================
+
+model PurchaseOrder {
+  id            String   @id @default(cuid())
+  poNumber      String   @unique
+  vendorId      String
+  status        POStatus @default(DRAFT)
+  totalAmount   Decimal  @db.Decimal(12, 2)
+  expectedDate  DateTime?
+  approvedBy    String?
+  approvedAt    DateTime?
+  notes         String?
+  locationId    String
+  createdBy     String
+  createdAt     DateTime @default(now())
+  updatedAt     DateTime @updatedAt
+  deletedAt     DateTime?
+
+  vendor Vendor              @relation(fields: [vendorId], references: [id])
+  lines  PurchaseOrderLine[]
+
+  @@index([poNumber])
+  @@index([vendorId])
+  @@index([status])
+  @@index([locationId])
+}
+
+model PurchaseOrderLine {
+  id              String   @id @default(cuid())
+  purchaseOrderId String
+  productId       String
+  lineNumber      Int
+  quantity        Decimal  @db.Decimal(10, 2)
+  unitCost        Decimal  @db.Decimal(10, 4)
+  extendedCost    Decimal  @db.Decimal(12, 2)
+  receivedQty     Decimal  @default(0) @db.Decimal(10, 2)
+  notes           String?
+
+  purchaseOrder PurchaseOrder @relation(fields: [purchaseOrderId], references: [id], onDelete: Cascade)
+
+  @@index([purchaseOrderId])
+  @@index([productId])
+}
+
+model VendorInvoice {
+  id            String   @id @default(cuid())
+  vendorId      String
+  invoiceNumber String
+  poNumber      String?
+  totalAmount   Decimal  @db.Decimal(12, 2)
+  dueDate       DateTime?
+  status        String   @default("PENDING")
+  matchStatus   String   @default("UNMATCHED")
+  notes         String?
+  fileUrl       String?
+  locationId    String
+  createdAt     DateTime @default(now())
+  updatedAt     DateTime @updatedAt
+
+  vendor Vendor @relation(fields: [vendorId], references: [id])
+
+  @@unique([vendorId, invoiceNumber])
+  @@index([vendorId])
+  @@index([status])
+  @@index([matchStatus])
+}
+
+model VendorClaim {
+  id          String   @id @default(cuid())
+  vendorId    String
+  type        String
+  description String
+  amount      Decimal? @db.Decimal(12, 2)
+  status      String   @default("OPEN")
+  resolvedAt  DateTime?
+  resolvedBy  String?
+  resolution  String?
+  attachments String[]
+  locationId  String
+  createdBy   String
+  createdAt   DateTime @default(now())
+  updatedAt   DateTime @updatedAt
+
+  vendor Vendor @relation(fields: [vendorId], references: [id])
+
+  @@index([vendorId])
+  @@index([status])
+}
+
+// ============================================================
+// COLLECTIONS
+// ============================================================
+
+model CollectionAccount {
+  id                     String           @id @default(cuid())
+  customerId             String
+  collectorId            String?
+  status                 CollectionStatus @default(ACTIVE)
+  currentBalance         Decimal          @db.Decimal(12, 2)
+  agingCurrent           Decimal          @default(0) @db.Decimal(12, 2)
+  aging30                Decimal          @default(0) @db.Decimal(12, 2)
+  aging60                Decimal          @default(0) @db.Decimal(12, 2)
+  aging90                Decimal          @default(0) @db.Decimal(12, 2)
+  aging120Plus           Decimal          @default(0) @db.Decimal(12, 2)
+  lastContactDate        DateTime?
+  lastPaymentDate        DateTime?
+  nextActionDate         DateTime?
+  nextActionNote         String?
+  promiseReliabilityScore Decimal?        @db.Decimal(3, 2)
+  holdRecommended        Boolean          @default(false)
+  holdReason             String?
+  internalMemo           String?
+  locationId             String
+  createdAt              DateTime         @default(now())
+  updatedAt              DateTime         @updatedAt
+
+  customer  Customer        @relation(fields: [customerId], references: [id])
+  promises  PromiseToPay[]
+  disputes  Dispute[]
+  callLogs  CollectionActivity[]
+  payments  PaymentPlan[]
+
+  @@unique([customerId])
+  @@index([collectorId])
+  @@index([status])
+  @@index([locationId])
+  @@index([nextActionDate])
+}
+
+model CollectionActivity {
+  id              String   @id @default(cuid())
+  accountId       String
+  type            String
+  direction       String?
+  contactMethod   String?
+  outcome         String?
+  notes           String?
+  followUpDate    DateTime?
+  promiseAmount   Decimal? @db.Decimal(12, 2)
+  createdBy       String
+  createdAt       DateTime @default(now())
+
+  account CollectionAccount @relation(fields: [accountId], references: [id], onDelete: Cascade)
+
+  @@index([accountId])
+  @@index([createdAt])
+}
+
+model PromiseToPay {
+  id              String        @id @default(cuid())
+  accountId       String
+  customerId      String
+  amount          Decimal       @db.Decimal(12, 2)
+  promiseDate     DateTime
+  status          PromiseStatus @default(PENDING)
+  paymentReceived Decimal?      @db.Decimal(12, 2)
+  receivedDate    DateTime?
+  notes           String?
+  createdBy       String
+  createdAt       DateTime      @default(now())
+  updatedAt       DateTime      @updatedAt
+
+  account CollectionAccount @relation(fields: [accountId], references: [id])
+
+  @@index([accountId])
+  @@index([promiseDate])
+  @@index([status])
+}
+
+model Dispute {
+  id          String        @id @default(cuid())
+  accountId   String
+  customerId  String
+  invoiceId   String?
+  amount      Decimal       @db.Decimal(12, 2)
+  reason      String
+  status      DisputeStatus @default(OPEN)
+  ownerId     String?
+  resolvedAt  DateTime?
+  resolution  String?
+  notes       String?
+  attachments String[]
+  createdBy   String
+  createdAt   DateTime      @default(now())
+  updatedAt   DateTime      @updatedAt
+
+  account CollectionAccount @relation(fields: [accountId], references: [id])
+
+  @@index([accountId])
+  @@index([status])
+  @@index([ownerId])
+}
+
+model PaymentPlan {
+  id              String   @id @default(cuid())
+  accountId       String
+  customerId      String
+  totalAmount     Decimal  @db.Decimal(12, 2)
+  installments    Int
+  frequency       String   @default("MONTHLY")
+  startDate       DateTime
+  status          String   @default("ACTIVE")
+  paidAmount      Decimal  @default(0) @db.Decimal(12, 2)
+  nextPaymentDate DateTime?
+  notes           String?
+  approvedBy      String?
+  createdBy       String
+  createdAt       DateTime @default(now())
+  updatedAt       DateTime @updatedAt
+
+  account CollectionAccount @relation(fields: [accountId], references: [id])
+
+  @@index([accountId])
+  @@index([status])
+}
+
+// ============================================================
+// CRM: LEADS & ESTIMATES
+// ============================================================
+
+model Lead {
+  id            String     @id @default(cuid())
+  companyName   String
+  contactName   String
+  email         String?
+  phone         String?
+  source        String?
+  status        LeadStatus @default(NEW)
+  assignedTo    String?
+  notes         String?
+  lostReason    String?
+  convertedCustomerId String?
+  locationId    String
+  createdBy     String
+  createdAt     DateTime   @default(now())
+  updatedAt     DateTime   @updatedAt
+  deletedAt     DateTime?
+
+  estimates Estimate[]
+
+  @@index([status])
+  @@index([assignedTo])
+  @@index([locationId])
+  @@index([deletedAt])
+}
+
+model Estimate {
+  id               String         @id @default(cuid())
+  estimateNumber   String         @unique
+  customerId       String?
+  leadId           String?
+  salesRepId       String
+  jobName          String?
+  jobAddress       String?
+  status           EstimateStatus @default(DRAFT)
+  totalAmount      Decimal        @db.Decimal(12, 2)
+  marginPercent    Decimal?       @db.Decimal(5, 2)
+  expiresAt        DateTime?
+  followUpDate     DateTime?
+  lostReason       String?
+  lostNotes        String?
+  convertedOrderId String?
+  notes            String?
+  locationId       String
+  createdBy        String
+  createdAt        DateTime       @default(now())
+  updatedAt        DateTime       @updatedAt
+  deletedAt        DateTime?
+
+  lead  Lead?          @relation(fields: [leadId], references: [id])
+  lines EstimateLine[]
+
+  @@index([estimateNumber])
+  @@index([customerId])
+  @@index([leadId])
+  @@index([salesRepId])
+  @@index([status])
+  @@index([locationId])
+}
+
+model EstimateLine {
+  id          String  @id @default(cuid())
+  estimateId  String
+  productId   String?
+  description String
+  quantity    Decimal @db.Decimal(10, 2)
+  uom         String
+  unitPrice   Decimal @db.Decimal(10, 2)
+  unitCost    Decimal @db.Decimal(10, 4)
+  extendedPrice Decimal @db.Decimal(12, 2)
+  notes       String?
+
+  estimate Estimate @relation(fields: [estimateId], references: [id], onDelete: Cascade)
+
+  @@index([estimateId])
+}
+
+// ============================================================
+// IMPORT / BRIDGE ENGINE
+// ============================================================
+
+model ImportJob {
+  id                String       @id @default(cuid())
+  type              ImportType
+  fileName          String
+  fileUrl           String
+  status            ImportStatus @default(UPLOADING)
+  totalRows         Int          @default(0)
+  processedRows     Int          @default(0)
+  createdRows       Int          @default(0)
+  updatedRows       Int          @default(0)
+  unchangedRows     Int          @default(0)
+  errorRows         Int          @default(0)
+  confidenceScore   Decimal?     @db.Decimal(3, 2)
+  mappingTemplateId String?
+  errors            Json?
+  reviewedBy        String?
+  reviewedAt        DateTime?
+  locationId        String
+  createdBy         String
+  createdAt         DateTime     @default(now())
+  updatedAt         DateTime     @updatedAt
+
+  changes ImportChange[]
+
+  @@index([type])
+  @@index([status])
+  @@index([locationId])
+  @@index([createdAt])
+}
+
+model ImportChange {
+  id          String   @id @default(cuid())
+  importJobId String
+  rowNumber   Int
+  entityType  String
+  entityId    String?
+  action      String
+  oldData     Json?
+  newData     Json?
+  confidence  Decimal? @db.Decimal(3, 2)
+  error       String?
+  approved    Boolean?
+  createdAt   DateTime @default(now())
+
+  importJob ImportJob @relation(fields: [importJobId], references: [id], onDelete: Cascade)
+
+  @@index([importJobId])
+  @@index([entityType, entityId])
+}
+
+// ============================================================
+// ATTACHMENTS & COMMUNICATION
+// ============================================================
+
+model Attachment {
+  id          String   @id @default(cuid())
+  entityType  String
+  entityId    String
+  fileName    String
+  fileUrl     String
+  mimeType    String
+  fileSize    Int
+  uploadedBy  String
+  createdAt   DateTime @default(now())
+
+  @@index([entityType, entityId])
+}
+
+model CommunicationLog {
+  id          String   @id @default(cuid())
+  customerId  String?
+  type        String
+  direction   String
+  to          String
+  from        String?
+  subject     String?
+  body        String?
+  status      String   @default("SENT")
+  channel     String
+  templateId  String?
+  metadata    Json?
+  createdBy   String?
+  createdAt   DateTime @default(now())
+
+  @@index([customerId])
+  @@index([type])
+  @@index([createdAt])
+}
+
+model NotificationTemplate {
+  id       String   @id @default(cuid())
+  code     String   @unique
+  name     String
+  channel  String
+  subject  String?
+  body     String
+  variables String[]
+  isActive Boolean  @default(true)
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  @@index([code])
+  @@index([channel])
 }
 
 // ============================================================
