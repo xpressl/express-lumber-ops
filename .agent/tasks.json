@@ -57,7 +57,7 @@
   {"id": "TASK-056", "title": "Phase 12B: Command center - page, today overview, exceptions, department health", "passes": true, "priority": 9},
   {"id": "TASK-057", "title": "Phase 12C: Reports - service, API, report page, chart components", "passes": true, "priority": 10},
   {"id": "TASK-058", "title": "Phase 12D: Exception center and daily close", "passes": true, "priority": 10},
-  {"id": "TASK-059", "title": "Phase 13: Unit and integration tests for services and API routes", "passes": false, "priority": 10},
-  {"id": "TASK-060", "title": "Phase 13: Workflow, permission, and mobile tests", "passes": false, "priority": 10},
-  {"id": "TASK-061", "title": "Phase 13: Performance optimization, security audit, seed data finalization", "passes": false, "priority": 10}
+  {"id": "TASK-059", "title": "Phase 13: Unit and integration tests for services and API routes", "passes": true, "priority": 10},
+  {"id": "TASK-060", "title": "Phase 13: Workflow, permission, and mobile tests", "passes": true, "priority": 10},
+  {"id": "TASK-061", "title": "Phase 13: Performance optimization, security audit, seed data finalization", "passes": true, "priority": 10}
 ]
