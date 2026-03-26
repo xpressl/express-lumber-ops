@@ -1,7 +1,16 @@
 import { PrismaClient } from "@prisma/client";
+import { PrismaPg } from "@prisma/adapter-pg";
+import { Pool } from "pg";
 import { hash } from "bcryptjs";
+import dotenv from "dotenv";
+import seedOrgMap from "./seed-org-map";
 
-const prisma = new PrismaClient();
+dotenv.config();
+
+const connectionString = process.env["DATABASE_URL"] ?? "postgresql://postgres:postgres@localhost:5432/express_lumber_ops";
+const pool = new Pool({ connectionString });
+const adapter = new PrismaPg(pool);
+const prisma = new PrismaClient({ adapter });
 
 async function main() {
   console.log("Seeding Express Lumber Ops database...");
@@ -482,6 +491,11 @@ async function main() {
     }
   }
   console.log(`Created ${policies.length} approval policies`);
+
+  // ============================================================
+  // 8. ORGANIZATION MAP
+  // ============================================================
+  await seedOrgMap(prisma);
 
   console.log("\nSeed complete!");
 }

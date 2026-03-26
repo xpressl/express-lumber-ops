@@ -24,6 +24,7 @@ import {
   ChevronLeft,
   ChevronRight,
   TreePine,
+  Network,
 } from "lucide-react";
 import type { LucideIcon } from "lucide-react";
 
@@ -52,6 +53,8 @@ const NAV_ITEMS: NavItem[] = [
   // Sales
   { label: "Customers", href: "/customers", icon: Users, section: "Sales", permission: "customers.view" },
   { label: "CRM", href: "/crm", icon: UserPlus, section: "Sales", permission: "crm.view_leads" },
+  // Organization
+  { label: "Org Map", href: "/org-map", icon: Network, section: "Organization", permission: "admin.manage_users" },
   // System
   { label: "Imports", href: "/imports", icon: Upload, section: "System", permission: "imports.view_history" },
   { label: "Reports", href: "/reports", icon: BarChart3, section: "System", permission: "admin.export_reports" },
